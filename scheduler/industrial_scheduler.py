@@ -9,8 +9,6 @@ def main():
     Main execution function for the industrial scheduler.
     """
     print("Initializing EVE Online Industrial Scheduler...")
-
-    # --- Phase 1: Initialization & Authentication ---
     sde = SdeLoader()
     esi = EsiManager()
     
@@ -28,78 +26,106 @@ def main():
         print("Invalid quantity. Defaulting to 1.")
         target_quantity = 1
     
-    # --- Phase 2: Calculation & Analysis ---
+    try:
+        mfg_slots = int(input(f"Enter available manufacturing slots [Default: 9]: ") or 9)
+        react_slots = int(input(f"Enter available reaction slots [Default: 5]: ") or 5)
+    except ValueError:
+        print("Invalid slot count. Using defaults.")
+        mfg_slots, react_slots = 9, 5
+
+    # --- Calculation & Analysis ---
     print("\nCalculating total requirements...")
-    total_raw_mats, total_components, final_prod_mats = dep_calc.get_total_requirements(target_product, target_quantity)
+    total_raw_mats, total_components = dep_calc.get_total_requirements(target_product, target_quantity)
 
     print("Fetching current inventory...")
     inventory_by_id = esi.get_inventory()
     inventory_by_name = {sde.get_type_name(tid): qty for tid, qty in inventory_by_id.items()}
 
-    # --- Deficit Calculation ---
-    component_deficits = defaultdict(float)
-    for comp, needed in total_components.items():
-        have = inventory_by_name.get(comp, 0)
+    # --- Calculate TOTAL Project Shopping List ---
+    total_project_shopping_list = defaultdict(float)
+    for mat, needed in total_raw_mats.items():
+        have = inventory_by_name.get(mat, 0)
         if have < needed:
-            component_deficits[comp] = needed - have
+            total_project_shopping_list[mat] = needed - have
 
     # --- Job Prioritization ---
     job_priorities = []
-    for comp, needed in total_components.items():
+    for comp, details in total_components.items():
         have = inventory_by_name.get(comp, 0)
-        # Ratio of completion. Lower is higher priority.
+        needed = details['needed']
         ratio = have / needed if needed > 0 else 1.0 
-        job_priorities.append({'name': comp, 'ratio': ratio})
+        job_priorities.append({'name': comp, 'ratio': ratio, 'activity_id': details['activity_id']})
     
-    # Sort jobs by completion ratio, lowest first
     job_priorities.sort(key=lambda x: x['ratio'])
     
-    # --- Determine Case 1 vs Case 2 ---
-    can_build_final_product = True
-    print("\n--- Pre-flight Check ---")
-    for mat, needed_per_run in final_prod_mats.items():
-        needed_total = needed_per_run * target_quantity
-        have = inventory_by_name.get(mat, 0)
-        if have < needed_total:
-            can_build_final_product = False
-            print(f"[-] Missing material for {target_product}: Need {math.ceil(needed_total)} {mat}, Have {have}.")
-    
-    if can_build_final_product:
-        print(f"[+] All direct materials for {target_quantity}x {target_product} are available.")
-    
+    # --- Intelligent Job Recommendation ---
+    recommended_mfg = []
+    recommended_react = []
+    immediate_shopping_list = defaultdict(float)
+
+    for job in job_priorities:
+        # Check if we have room for this job type
+        if job['activity_id'] == 1 and len(recommended_mfg) >= mfg_slots:
+            continue
+        if job['activity_id'] == 11 and len(recommended_react) >= react_slots:
+            continue
+        
+        direct_materials = dep_calc.get_direct_materials_for_product_name(job['name'])
+        is_buildable = True
+        missing_raws_for_this_job = defaultdict(float)
+
+        for mat, needed_per in direct_materials.items():
+            have = inventory_by_name.get(mat, 0)
+            if have < needed_per:
+                # Is the missing material a raw mineral/item or a sub-component?
+                if mat in dep_calc.raw_materials:
+                    missing_raws_for_this_job[mat] += needed_per - have
+                else: # Missing a sub-component, can't build this job right now.
+                    is_buildable = False
+                    break 
+        
+        if is_buildable:
+            if job['activity_id'] == 1:
+                recommended_mfg.append(job['name'])
+            else:
+                recommended_react.append(job['name'])
+            
+            # Add any missing raws for this buildable job to the immediate shopping list
+            for item, qty in missing_raws_for_this_job.items():
+                immediate_shopping_list[item] += qty
+
     # --- Display Actionable Plan ---
     print("\n" + "="*20 + " ACTION PLAN " + "="*20)
     
-    if can_build_final_product:
-        # --- CASE 1: Enough components for final runs ---
-        print(f"Start Manufacturing: {target_quantity}x {target_product}")
-        print("\nFill unused production slots with the following components (highest priority first):")
-        
-        # Filter out the final product itself from the component list
-        priority_components = [job for job in job_priorities if job['name'] != target_product]
-        
-        if not priority_components:
-            print("  - All components are already built. Nothing to do.")
-        else:
-            for job in priority_components[:10]: # Show top 10 priorities
-                print(f"  - Build {job['name']} (Completion: {job['ratio']:.2%})")
-
+    print(f"\n--- Recommended Manufacturing Jobs ({len(recommended_mfg)}/{mfg_slots} slots) ---")
+    if not recommended_mfg:
+        print("  - None")
     else:
-        # --- CASE 2: Not enough components for final runs ---
-        print("Cannot start final assembly. Focus on building missing components.")
-        print("Build the following (highest priority first):")
-        
-        # We only need to show components we actually have a deficit in
-        priority_deficits = [job for job in job_priorities if job['name'] in component_deficits]
-        
-        if not priority_deficits:
-             print("  - No component deficits found, but pre-flight check failed. Check raw materials.")
-        else:
-            for job in priority_deficits[:10]: # Show top 10 priorities
-                print(f"  - Build {job['name']} (Completion: {job['ratio']:.2%})")
+        for job_name in recommended_mfg:
+            print(f"  - Start 1 run of: {job_name}")
+
+    print(f"\n--- Recommended Reaction Jobs ({len(recommended_react)}/{react_slots} slots) ---")
+    if not recommended_react:
+        print("  - None")
+    else:
+        for job_name in recommended_react:
+            print(f"  - Start 1 run of: {job_name}")
+
+    if immediate_shopping_list:
+        print("\n--- Shopping List (for IMMEDIATE jobs) ---")
+        for item, qty in sorted(immediate_shopping_list.items()):
+            print(f"{item} {math.ceil(qty)}")
+
+    if total_project_shopping_list:
+        print("\n--- TOTAL Project Shopping List ---")
+        for item, qty in sorted(total_project_shopping_list.items()):
+            print(f"{item} {math.ceil(qty)}")
+    else:
+        print("\n--- TOTAL Project Shopping List ---")
+        print("  - All required raw materials are already in your structures.")
+
 
     print("\n" + "="*53)
-
 
 if __name__ == '__main__':
     main()
