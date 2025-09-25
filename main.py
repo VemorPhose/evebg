@@ -12,7 +12,7 @@ class IndustryCalculator:
     # Add items here to treat them as raw materials, even if a blueprint exists
     FORCE_RAW_MATERIALS = {
         'R.A.M.- Starship Tech', 'Oxygen Fuel Block', 'Hydrogen Fuel Block', 'Helium Fuel Block',
-        'Nitrogen Fuel Block', 'Catalyst'
+        'Nitrogen Fuel Block'
     }
 
     def __init__(self, data_path='./static_data'):
@@ -104,7 +104,6 @@ class IndustryCalculator:
             
             production_jobs[job_name]['total_required'] += required_quantity
             
-            # If we've already processed this component's sub-tree, don't do it again
             if blueprint_id in processed_components:
                 return
 
@@ -112,10 +111,7 @@ class IndustryCalculator:
             for _, material in materials.iterrows():
                 mat_id = material['materialTypeID']
                 qty_per_run = material['quantity']
-                # Store children for later ratio calculation
                 production_jobs[job_name]['children'].append({'id': mat_id, 'qty_per_run': qty_per_run})
-                
-                # The quantity of sub-component needed for the requested parent quantity
                 total_material_needed = (required_quantity / products_per_run) * qty_per_run
                 process_component(mat_id, total_material_needed)
             
@@ -124,7 +120,6 @@ class IndustryCalculator:
 
         process_component(final_product_id, concurrent_runs)
 
-        # --- Post-processing for final numbers and ratios ---
         final_blueprint_info = self.get_blueprint_for_product(final_product_id)
         if not final_blueprint_info.empty:
             final_job_name = self.get_type_name(final_blueprint_info['typeID'])
@@ -132,37 +127,30 @@ class IndustryCalculator:
             print(f"Could not find a blueprint for {final_product_name}")
             return
             
-        # Calculate runs needed
         for job, details in production_jobs.items():
             details['fractional_runs'] = details['total_required'] / details['products_per_run']
             details['runs_needed'] = math.ceil(details['fractional_runs'])
             details['ratio'] = 0
 
-        # Calculate ratios via BFS traversal from the final product
         production_jobs[final_job_name]['ratio'] = float(concurrent_runs)
         
         q = deque([production_jobs[final_job_name]['blueprint_id']])
         visited_for_ratio = {production_jobs[final_job_name]['blueprint_id']}
-
         while q:
             parent_bp_id = q.popleft()
             parent_job_name = self.get_type_name(parent_bp_id)
             parent_details = production_jobs[parent_job_name]
 
             if parent_details['time'] == 0: continue
-
-            parent_supply_rate_per_job = parent_details['products_per_run'] / parent_details['time']
             
             for child in parent_details.get('children', []):
                 child_id = child['id']
                 child_bp_info = self.get_blueprint_for_product(child_id)
                 
-                # If child is a manufactured/reacted component
                 if child_bp_info is not None:
                     child_bp_id = child_bp_info['typeID']
                     child_job_name = self.get_type_name(child_bp_id)
                     
-                    # Check if the child is a job we are actually building before calculating ratios
                     if child_job_name in production_jobs:
                         child_details = production_jobs[child_job_name]
                         
@@ -175,6 +163,21 @@ class IndustryCalculator:
                                 q.append(child_bp_id)
                                 visited_for_ratio.add(child_bp_id)
 
+        # --- Find best whole number ratio multiplier using squared error from ceiling ---
+        ratios_to_optimize = [details['ratio'] for details in production_jobs.values() if details['ratio'] > 0]
+        best_multiplier = 1
+        if ratios_to_optimize:
+            lowest_cost = float('inf')
+            # Iterate from 1 to 10 to find the multiplier with the lowest cost
+            for m in range(1, 11):
+                cost = sum((math.ceil(r * m) - (r * m))**2 for r in ratios_to_optimize)
+                if cost < lowest_cost:
+                    lowest_cost = cost
+                    best_multiplier = m
+        
+        for details in production_jobs.values():
+            details['closest_whole_ratio'] = details['ratio'] * best_multiplier
+            details['rounded_up_ratio'] = math.ceil(details['closest_whole_ratio'])
 
         # --- Display Results ---
         print("\n--- Raw Materials Required (Multibuy Format) ---")
@@ -188,14 +191,18 @@ class IndustryCalculator:
             jobs_in_activity = {k: v for k, v in production_jobs.items() if v['activity_id'] == activity_id}
             if not jobs_in_activity: continue
 
-            print(f"\n--- {activity_name} Jobs ---")
-            print(f"{'Blueprint':<40} | {'Runs Needed':<15} | {'Fractional Runs':<20} | {'Concurrent Jobs Ratio':<25}")
-            print("-" * 110)
+            print(f"\n--- {activity_name} Jobs (Optimal Multiplier: {best_multiplier}) ---")
+            header = (f"{'Blueprint':<40} | {'Runs Needed':<12} | {'Fractional Runs':<18} | "
+                      f"{'Job Ratio':<15} | {'Near Whole Ratio':<20} | {'Rounded Ratio':<15}")
+            print(header)
+            print("-" * len(header))
 
             sorted_jobs = sorted(jobs_in_activity.items(), key=lambda item: item[1]['ratio'], reverse=True)
 
             for job, details in sorted_jobs:
-                 print(f"{job:<40} | {details['runs_needed']:<15} | {details['fractional_runs']:<20.4f} | {details['ratio']:.4f}")
+                 line = (f"{job:<40} | {details['runs_needed']:<12} | {details['fractional_runs']:<18.4f} | "
+                         f"{details['ratio']:<15.4f} | {details['closest_whole_ratio']:<20.4f} | {details['rounded_up_ratio']:<15}")
+                 print(line)
 
 if __name__ == '__main__':
     calculator = IndustryCalculator(data_path='./static_data')
@@ -209,3 +216,4 @@ if __name__ == '__main__':
         runs = 1
         
     calculator.calculate_production_chain(product_name, runs)
+
