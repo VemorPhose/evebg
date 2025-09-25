@@ -1,9 +1,6 @@
 import pandas as pd
 
 class SdeLoader:
-    """
-    Handles loading and providing access to the EVE Online Static Data Export (SDE) files.
-    """
     def __init__(self, data_path='../static_data'):
         """Load data from the EVE Online SDE files."""
         try:
@@ -14,13 +11,8 @@ class SdeLoader:
             self.inv_types.set_index('typeID', inplace=True)
             print("SDE data loaded successfully.")
         except FileNotFoundError as e:
-            print(f"Error loading SDE data: {e}. Make sure the 'static_data' directory is correct.")
+            print(f"Error loading SDE files: {e}. Make sure the 'static_data' directory is present.")
             exit()
-
-    def get_type_id(self, type_name):
-        """Get typeID from typeName."""
-        result = self.inv_types[self.inv_types['typeName'] == type_name]
-        return result.index[0] if not result.empty else None
 
     def get_type_name(self, type_id):
         """Get typeName from typeID."""
@@ -29,12 +21,14 @@ class SdeLoader:
         except KeyError:
             return f"Unknown TypeID: {type_id}"
 
+    def get_type_id(self, type_name):
+        """Get typeID from typeName."""
+        result = self.inv_types[self.inv_types['typeName'] == type_name]
+        return result.index[0] if not result.empty else None
+
     def get_blueprint_for_product(self, product_type_id):
-        """
-        Find the blueprint/formula that produces a given product.
-        Prioritizes manufacturing (1) over reactions (11).
-        """
-        for activity_id in [1, 11]:
+        """Find the blueprint/formula that produces a given product."""
+        for activity_id in [1, 11]: # Prioritize manufacturing
             blueprint = self.activity_products[
                 (self.activity_products['productTypeID'] == product_type_id) & 
                 (self.activity_products['activityID'] == activity_id)
@@ -49,7 +43,7 @@ class SdeLoader:
             (self.activity_materials['typeID'] == blueprint_type_id) & 
             (self.activity_materials['activityID'] == activity_id)
         ]
-        
+
     def get_production_time(self, blueprint_type_id, activity_id):
         """Get the production time for a specific blueprint and activity."""
         time_info = self.industry_activity[

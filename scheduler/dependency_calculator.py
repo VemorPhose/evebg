@@ -1,87 +1,103 @@
-import math
 from collections import defaultdict
 
 class DependencyCalculator:
-    """
-    Calculates the entire dependency tree for a final product,
-    breaking it down into raw materials and intermediate components.
-    """
     def __init__(self, sde_loader):
         self.sde = sde_loader
+        # This is the base list of minerals and blueprint components we always buy.
         self.raw_materials = {
             'Tritanium', 'Pyerite', 'Mexallon', 'Isogen',
             'Nocxium', 'Zydrine', 'Megacyte', 'Morphite',
             'R.A.M.- Starship Tech', 'Oxygen Fuel Block', 'Hydrogen Fuel Block', 
-            'Helium Fuel Block', 'Nitrogen Fuel Block', 'Catalyst'
+            'Helium Fuel Block', 'Nitrogen Fuel Block'
         }
+        
+        # This is the list of raw materials that come from reactions (moon mining).
+        # Updated based on your provided list.
+        reaction_inputs = {
+            'Atmospheric Gases', 'Cadmium', 'Caesium', 'Chromium', 'Cobalt',
+            'Dysprosium', 'Evaporite Deposits', 'Hafnium', 'Hydrocarbons',
+            'Mercury', 'Neodymium', 'Platinum', 'Promethium', 'Scandium',
+            'Silicates', 'Technetium', 'Thulium', 'Titanium', 'Tungsten', 'Vanadium'
+        }
+        # We add the reaction inputs to the main set of raw materials.
+        self.raw_materials.update(reaction_inputs)
+        
+        self.total_components = {}
+        self.processed_components_memo = set()
 
     def get_total_requirements(self, final_product_name, quantity=1):
-        """
-        Calculates all raw materials and intermediate build components for a target product.
+        """Calculates the total raw materials and intermediate components needed for a final product."""
+        self.total_components = {}
+        self.processed_components_memo = set()
         
-        Returns two dictionaries:
-        1. Total raw materials required.
-        2. Total intermediate components, with details on quantity, activity type, and time.
-        """
         final_product_id = self.sde.get_type_id(final_product_name)
         if not final_product_id:
             print(f"Error: Final product '{final_product_name}' not found.")
             return {}, {}
 
-        total_raws = defaultdict(float)
-        total_components = defaultdict(lambda: {'needed': 0, 'activity_id': 0, 'time_per_run': 0})
+        # The main recursive call to build the dependency tree
+        self._process_component(final_product_id, quantity)
         
-        memo = {}
+        # Now, calculate total raw materials from the complete component list
+        total_raws = defaultdict(float)
+        for comp_name, details in self.total_components.items():
+            materials = self.get_direct_materials_for_product_name(comp_name)
+            for mat_name, qty_per_run in materials.items():
+                if mat_name in self.raw_materials:
+                    # Calculate how many runs of the component are needed
+                    runs_needed = details['needed'] / details.get('products_per_run', 1)
+                    total_raws[mat_name] += runs_needed * qty_per_run
 
-        def process_component(product_id, required_quantity):
-            if product_id in memo and memo[product_id] >= required_quantity:
-                return
-            memo[product_id] = required_quantity
+        return dict(total_raws), self.total_components
 
-            product_name = self.sde.get_type_name(product_id)
-            blueprint_info = self.sde.get_blueprint_for_product(product_id)
+    def _process_component(self, product_id, required_quantity):
+        """Recursively builds a list of all required components and their quantities."""
+        product_name = self.sde.get_type_name(product_id)
 
-            if product_name in self.raw_materials or blueprint_info is None:
-                total_raws[product_name] += required_quantity
-                return
+        if product_name in self.raw_materials:
+            return
 
-            blueprint_id = blueprint_info['typeID']
-            activity_id = blueprint_info['activityID']
-            products_per_run = blueprint_info['quantity']
-            time_per_run = self.sde.get_production_time(blueprint_id, activity_id)
+        blueprint_info = self.sde.get_blueprint_for_product(product_id)
+        if blueprint_info is None:
+            # If no blueprint, treat as a raw material. This adds PI goods etc. automatically.
+            self.raw_materials.add(product_name)
+            return
 
-            total_components[product_name]['needed'] += required_quantity
-            total_components[product_name]['activity_id'] = activity_id
-            total_components[product_name]['time_per_run'] = time_per_run
+        blueprint_id = blueprint_info['typeID']
+        activity_id = blueprint_info['activityID']
+        products_per_run = blueprint_info['quantity']
+
+        if product_name not in self.total_components:
+            self.total_components[product_name] = {
+                'needed': 0, 'products_per_run': products_per_run, 'activity_id': activity_id,
+                'time_per_run': self.sde.get_production_time(blueprint_id, activity_id)
+            }
+        
+        self.total_components[product_name]['needed'] += required_quantity
+        
+        if blueprint_id in self.processed_components_memo:
+            return
+        self.processed_components_memo.add(blueprint_id)
+
+        materials = self.sde.get_materials(blueprint_id, activity_id)
+        for _, material in materials.iterrows():
+            total_material_needed = (required_quantity / products_per_run) * material['quantity']
+            self._process_component(material['materialTypeID'], total_material_needed)
             
-            materials = self.sde.get_materials(blueprint_id, activity_id)
-            for _, material in materials.iterrows():
-                mat_id = material['materialTypeID']
-                qty_per_run = material['quantity']
-                total_material_needed = (required_quantity / products_per_run) * qty_per_run
-                process_component(mat_id, total_material_needed)
-
-        process_component(final_product_id, quantity)
-        return dict(total_raws), dict(total_components)
-
     def get_direct_materials_for_product_name(self, product_name):
-        """
-        Returns a dictionary of direct material requirements for a single run of a product.
-        {material_name: quantity}
-        """
+        """Returns a dict of direct materials and quantities for one run of a product."""
         product_id = self.sde.get_type_id(product_name)
-        if not product_id:
-            return {}
+        if not product_id: return {}
+        
+        blueprint_info = self.sde.get_blueprint_for_product(product_id)
+        if blueprint_info is None: return {}
 
-        bp_info = self.sde.get_blueprint_for_product(product_id)
-        if bp_info is None:
-            return {}
-            
-        materials_df = self.sde.get_materials(bp_info['typeID'], bp_info['activityID'])
-        direct_materials = {}
+        materials_df = self.sde.get_materials(blueprint_info['typeID'], blueprint_info['activityID'])
+        
+        materials_dict = {}
         for _, material in materials_df.iterrows():
             mat_name = self.sde.get_type_name(material['materialTypeID'])
-            direct_materials[mat_name] = material['quantity']
+            materials_dict[mat_name] = material['quantity']
         
-        return direct_materials
+        return materials_dict
 
