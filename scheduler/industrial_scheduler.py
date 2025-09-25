@@ -2,7 +2,7 @@ from sde_loader import SdeLoader
 from esi_manager import EsiManager
 from dependency_calculator import DependencyCalculator
 import math
-from collections import defaultdict
+from collections import defaultdict, deque
 
 class IndustrialScheduler:
     def __init__(self):
@@ -15,10 +15,6 @@ class IndustrialScheduler:
         self.mfg_slots = 0
         self.react_slots = 0
         
-        self.recommended_jobs = []
-        self.shopping_list = defaultdict(float)
-        self.memoization = {} # To avoid re-calculating components
-
     def run(self):
         if not self.esi.authenticate():
             print("Authentication failed. Exiting.")
@@ -27,10 +23,12 @@ class IndustrialScheduler:
         self._get_user_input()
         self._fetch_inventory()
         
-        print("\nPlanning production chain...")
-        self._plan_for_target()
-        self._plan_filler_reactions()
-        
+        # This pre-calculation is necessary to populate the dependency calculator's internal state
+        # with all possible components in the tree for the target product.
+        print("\nPre-calculating full dependency tree...")
+        self.dep_calc.get_total_requirements(self.target_product, self.target_quantity)
+
+        self._plan_production_run()
         self._display_action_plan()
 
     def _get_user_input(self):
@@ -38,14 +36,12 @@ class IndustrialScheduler:
         try:
             self.target_quantity = int(input(f"How many {self.target_product} do you want to build? [Default: 1]: ") or 1)
         except ValueError:
-            print("Invalid quantity. Defaulting to 1.")
             self.target_quantity = 1
         
         try:
             self.mfg_slots = int(input(f"Enter available manufacturing slots [Default: 9]: ") or 9)
             self.react_slots = int(input(f"Enter available reaction slots [Default: 5]: ") or 5)
         except ValueError:
-            print("Invalid slot count. Using defaults.")
             self.mfg_slots, self.react_slots = 9, 5
 
     def _fetch_inventory(self):
@@ -53,142 +49,119 @@ class IndustrialScheduler:
         inventory_by_id = self.esi.get_inventory()
         self.inventory_by_name = {self.sde.get_type_name(tid): qty for tid, qty in inventory_by_id.items()}
 
-    def _plan_for_target(self):
-        needed_for_target = self.dep_calc.get_direct_materials_for_product_name(self.target_product)
-        # We start by "needing" the final product itself
-        self._recursive_plan(self.target_product, self.target_quantity)
-
-    def _recursive_plan(self, component_name, needed_qty):
-        """
-        Recursively checks if a component can be built and adds it to the recommendation list if so.
-        Returns True if the component is available or can be built/bought, False otherwise.
-        """
-        if component_name in self.memoization:
-            return self.memoization[component_name]
-
-        have = self.inventory_by_name.get(component_name, 0)
-        if have >= needed_qty:
-            self.memoization[component_name] = True
-            return True
-
-        # If it's a raw material, we just need to buy it.
+    def _is_raw_material(self, component_name):
+        """Checks if a component is a raw material (minerals, PI, reactions, etc.)."""
+        # A component is raw if it's in our predefined list or has no blueprint.
         if component_name in self.dep_calc.raw_materials:
-            self.shopping_list[component_name] += needed_qty - have
-            self.memoization[component_name] = True # Treat as "available" after buying
             return True
-
-        # It's a buildable component and we need more.
-        # Check if we have slots available for this type of job.
-        activity_id = self.dep_calc.total_components.get(component_name, {}).get('activity_id')
-        if not activity_id: return False # Should not happen if data is consistent
-
-        current_mfg_jobs = sum(1 for job in self.recommended_jobs if job['activity_id'] == 1)
-        current_react_jobs = sum(1 for job in self.recommended_jobs if job['activity_id'] == 11)
-
-        if (activity_id == 1 and current_mfg_jobs >= self.mfg_slots) or \
-           (activity_id == 11 and current_react_jobs >= self.react_slots):
-            self.memoization[component_name] = False # No slots, can't build it now.
-            return False
-
-        # Check sub-components recursively
-        sub_components_available = True
-        direct_materials = self.dep_calc.get_direct_materials_for_product_name(component_name)
-
-        for sub_comp, qty_per_run in direct_materials.items():
-            if not self._recursive_plan(sub_comp, qty_per_run): # Assume we check for 1 run for simplicity
-                sub_components_available = False
         
-        # After checking all children, decide if we can queue this job.
-        if sub_components_available:
-            # All sub-components are either present or can be made/bought.
-            # We can recommend this job.
-            time_per_run = self.dep_calc.total_components.get(component_name, {}).get('time_per_run', 0)
-            runs = max(1, round(86400 / time_per_run)) if time_per_run > 0 else 1
-
-            job_info = {'name': component_name, 'runs': runs, 'activity_id': activity_id}
-            self.recommended_jobs.append(job_info)
-            
-            # Update shopping list for this job's raw materials if needed
-            for mat, needed_per in direct_materials.items():
-                if mat in self.dep_calc.raw_materials:
-                    needed_for_batch = needed_per * runs
-                    have_mat = self.inventory_by_name.get(mat, 0)
-                    if have_mat < needed_for_batch:
-                        self.shopping_list[mat] += needed_for_batch - have_mat
-            
-            self.memoization[component_name] = True
+        # Check if a blueprint exists. If not, it's a raw material (like PI goods).
+        product_id = self.sde.get_type_id(component_name)
+        if not product_id or self.sde.get_blueprint_for_product(product_id) is None:
             return True
-
-        self.memoization[component_name] = False
+            
         return False
 
-    def _plan_filler_reactions(self):
-        """If reaction slots are free, find simple reactions to run."""
-        current_react_jobs = sum(1 for job in self.recommended_jobs if job['activity_id'] == 11)
-        while current_react_jobs < self.react_slots:
-            found_filler = False
-            for reaction_name, details in self.dep_calc.total_components.items():
-                if details['activity_id'] == 11 and reaction_name not in [j['name'] for j in self.recommended_jobs]:
-                    inputs = self.dep_calc.get_direct_materials_for_product_name(reaction_name)
-                    if all(mat in self.dep_calc.raw_materials for mat in inputs):
-                        # This is a simple reaction, add it as a filler
-                        time_per_run = details.get('time_per_run', 0)
-                        runs = max(1, round(86400 / time_per_run)) if time_per_run > 0 else 1
-                        job_info = {'name': reaction_name, 'runs': runs, 'activity_id': 11, 'is_filler': True}
-                        self.recommended_jobs.append(job_info)
-                        
-                        # Add its materials to the shopping list
-                        for mat, needed_per in inputs.items():
-                            needed_for_batch = needed_per * runs
-                            have_mat = self.inventory_by_name.get(mat, 0)
-                            if have_mat < needed_for_batch:
-                                self.shopping_list[mat] += needed_for_batch - have_mat
+    def _plan_production_run(self):
+        """Plans the production run using a Breadth-First Search (BFS) algorithm."""
+        print("Planning buildable jobs using BFS...")
+        
+        self.recommended_jobs = []
+        self.shopping_list = defaultdict(float)
+        
+        queue = deque([self.target_product])
+        visited = {self.target_product}
+        SECONDS_IN_A_DAY = 86400
 
-                        current_react_jobs += 1
-                        found_filler = True
-                        break # Move to the next slot
-            if not found_filler:
-                break # No more simple reactions to add
+        while queue:
+            current_comp_name = queue.popleft()
+
+            # We don't build raw materials
+            if self._is_raw_material(current_comp_name):
+                continue
+
+            # Calculate batch size for ~24h
+            comp_details = self.dep_calc.total_components.get(current_comp_name)
+            if not comp_details: continue # Should not happen if pre-calc worked
+            
+            time_per_run = comp_details.get('time_per_run', 0)
+            runs_for_batch = max(1, round(SECONDS_IN_A_DAY / time_per_run)) if time_per_run > 0 else 1
+
+            # Get direct materials and categorize them
+            direct_materials = self.dep_calc.get_direct_materials_for_product_name(current_comp_name)
+            producable_inputs = {}
+            raw_inputs = {}
+            for mat, qty in direct_materials.items():
+                if self._is_raw_material(mat):
+                    raw_inputs[mat] = qty
+                else:
+                    producable_inputs[mat] = qty
+
+            # Check if all producable inputs are available for the batch
+            can_build = True
+            for sub_comp, qty_per in producable_inputs.items():
+                needed_for_batch = qty_per * runs_for_batch
+                if self.inventory_by_name.get(sub_comp, 0) < needed_for_batch:
+                    can_build = False
+                    # Add missing sub-component to queue if not already visited
+                    if sub_comp not in visited:
+                        queue.append(sub_comp)
+                        visited.add(sub_comp)
+
+            if can_build:
+                # Add this job to recommendations
+                job_info = {
+                    'name': current_comp_name,
+                    'runs': runs_for_batch,
+                    'activity_id': comp_details['activity_id']
+                }
+                self.recommended_jobs.append(job_info)
+
+                # Check for and add missing raw materials to shopping list
+                for raw_mat, qty_per in raw_inputs.items():
+                    needed_for_batch = qty_per * runs_for_batch
+                    if self.inventory_by_name.get(raw_mat, 0) < needed_for_batch:
+                        self.shopping_list[raw_mat] += needed_for_batch - self.inventory_by_name.get(raw_mat, 0)
 
     def _display_action_plan(self):
+        mfg_to_start = [j for j in self.recommended_jobs if j['activity_id'] == 1][:self.mfg_slots]
+        react_to_start = [j for j in self.recommended_jobs if j['activity_id'] == 11][:self.react_slots]
+
         print("\n" + "="*20 + " ACTION PLAN " + "="*20)
 
-        mfg_jobs = [j for j in self.recommended_jobs if j['activity_id'] == 1]
-        react_jobs = [j for j in self.recommended_jobs if j['activity_id'] == 11]
+        print(f"\n--- Recommended Manufacturing Jobs ({len(mfg_to_start)}/{self.mfg_slots} slots) ---")
+        if not mfg_to_start: print("  - None")
+        for job in mfg_to_start:
+            print(f"\n  - Start {job['runs']} run(s) of: {job['name']}")
+            # Sanity Check
+            direct_mats = self.dep_calc.get_direct_materials_for_product_name(job['name'])
+            for mat, needed_per in direct_mats.items():
+                needed_total = needed_per * job['runs']
+                have = self.inventory_by_name.get(mat, 0)
+                print(f"    - Req: {mat} ({math.ceil(needed_total)}), Have: {have}")
 
-        print(f"\n--- Recommended Manufacturing Jobs ({len(mfg_jobs)}/{self.mfg_slots} slots) ---")
-        if not mfg_jobs: print("  - None")
-        for job in mfg_jobs:
-            print(f"  - Start {job['runs']} run(s) of: {job['name']}")
-
-        print(f"\n--- Recommended Reaction Jobs ({len(react_jobs)}/{self.react_slots} slots) ---")
-        if not react_jobs: print("  - None")
-        for job in react_jobs:
-            tag = "(Filler)" if job.get('is_filler') else ""
-            print(f"  - Start {job['runs']} run(s) of: {job['name']} {tag}")
-
+        print(f"\n--- Recommended Reaction Jobs ({len(react_to_start)}/{self.react_slots} slots) ---")
+        if not react_to_start: print("  - None")
+        for job in react_to_start:
+            print(f"\n  - Start {job['runs']} run(s) of: {job['name']}")
+            # Sanity Check
+            direct_mats = self.dep_calc.get_direct_materials_for_product_name(job['name'])
+            for mat, needed_per in direct_mats.items():
+                needed_total = needed_per * job['runs']
+                have = self.inventory_by_name.get(mat, 0)
+                print(f"    - Req: {mat} ({math.ceil(needed_total)}), Have: {have}")
+        
         if self.shopping_list:
-            print("\n--- Shopping List ---")
+            print("\n--- Shopping List (for recommended jobs) ---")
             for item, qty in sorted(self.shopping_list.items()):
                 print(f"{item} {math.ceil(qty)}")
         else:
             print("\n--- Shopping List ---")
-            print("  - No items need to be purchased.")
-            
+            print("  - No items need to be purchased for the recommended jobs.")
+
         print("\n" + "="*53)
 
 
 if __name__ == '__main__':
-    # Initial calculation is needed to populate the dependency calculator's internal state
-    # This feels a bit clunky but is necessary for the recursive logic to have access to the full tree
-    temp_dep_calc = DependencyCalculator(SdeLoader())
-    print("Pre-calculating full dependency tree for performance...")
-    # We need a representative T2 product to build the full component tree
-    temp_dep_calc.get_total_requirements("Eris", 1) 
-    
-    # Now run the main scheduler
     scheduler = IndustrialScheduler()
-    # Pass the pre-warmed dependency calculator to the main instance
-    scheduler.dep_calc = temp_dep_calc
     scheduler.run()
-
