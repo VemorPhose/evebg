@@ -2,10 +2,10 @@ import pandas as pd
 
 class SdeLoader:
     """
-    Handles loading and providing access to the EVE Online Static Data Export (SDE).
+    Handles loading and providing access to the EVE Online Static Data Export (SDE) files.
     """
     def __init__(self, data_path='../static_data'):
-        """Load all necessary SDE files into memory."""
+        """Load data from the EVE Online SDE files."""
         try:
             self.industry_activity = pd.read_csv(f'{data_path}/industryActivity.csv')
             self.activity_materials = pd.read_csv(f'{data_path}/industryActivityMaterials.csv')
@@ -14,8 +14,7 @@ class SdeLoader:
             self.inv_types.set_index('typeID', inplace=True)
             print("SDE data loaded successfully.")
         except FileNotFoundError as e:
-            print(f"Error loading SDE files: {e}")
-            print("Please ensure the 'static_data' directory is present and contains the required CSV files.")
+            print(f"Error loading SDE data: {e}. Make sure the 'static_data' directory is correct.")
             exit()
 
     def get_type_id(self, type_name):
@@ -44,17 +43,10 @@ class SdeLoader:
                 return blueprint.iloc[0]
         return None
 
-    def get_materials_for_blueprint(self, blueprint_type_id, activity_id):
-        """Get materials for a specific blueprint and activity."""
+    def get_materials(self, blueprint_type_id, activity_id):
+        """Get materials required for a specific blueprint and activity."""
         return self.activity_materials[
             (self.activity_materials['typeID'] == blueprint_type_id) & 
             (self.activity_materials['activityID'] == activity_id)
         ]
 
-    def get_time_for_blueprint(self, blueprint_type_id, activity_id):
-        """Get the base production time for a blueprint."""
-        time_info = self.industry_activity[
-            (self.industry_activity['typeID'] == blueprint_type_id) & 
-            (self.industry_activity['activityID'] == activity_id)
-        ]
-        return time_info.iloc[0]['time'] if not time_info.empty else 0
