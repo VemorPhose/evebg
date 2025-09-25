@@ -3,62 +3,78 @@ from collections import defaultdict
 
 class DependencyCalculator:
     """
-    Calculates the total, ideal material and component requirements for a
-    target build, ignoring any existing inventory.
+    Calculates the entire dependency tree for a final product,
+    breaking it down into raw materials and intermediate components.
     """
     def __init__(self, sde_loader):
         self.sde = sde_loader
-        # A list of items to always treat as raw materials
-        self.force_raw_materials = {
+        self.raw_materials = {
             'Tritanium', 'Pyerite', 'Mexallon', 'Isogen',
             'Nocxium', 'Zydrine', 'Megacyte', 'Morphite',
             'R.A.M.- Starship Tech', 'Oxygen Fuel Block', 'Hydrogen Fuel Block', 
-            'Helium Fuel Block', 'Nitrogen Fuel Block'
+            'Helium Fuel Block', 'Nitrogen Fuel Block', 'Catalyst'
         }
 
-    def get_total_requirements(self, product_name, quantity=1):
+    def get_total_requirements(self, final_product_name, quantity=1):
         """
-        Performs a full recursive calculation for all materials and intermediate
-        components required to build a final product.
-
-        Returns two dictionaries:
-        - bill_of_materials: {type_name: quantity} for raw materials.
-        - component_jobs: {type_name: quantity} for intermediate components to be built.
-        """
-        print(f"Calculating total requirements for {quantity}x {product_name}...")
-        product_id = self.sde.get_type_id(product_name)
-        if not product_id:
-            print(f"Error: Could not find '{product_name}' in SDE.")
-            return {}, {}
-
-        bill_of_materials = defaultdict(float)
-        component_jobs = defaultdict(float)
+        Calculates all raw materials and intermediate build components for a target product.
         
-        def process_component(p_id, p_qty):
-            p_name = self.sde.get_type_name(p_id)
-            blueprint = self.sde.get_blueprint_for_product(p_id)
+        Returns three dictionaries:
+        1. Total raw materials required.
+        2. Total intermediate components to be built.
+        3. Direct materials needed for one run of the final product.
+        """
+        final_product_id = self.sde.get_type_id(final_product_name)
+        if not final_product_id:
+            print(f"Error: Final product '{final_product_name}' not found.")
+            return {}, {}, {}
 
-            if p_name in self.force_raw_materials or blueprint is None:
-                bill_of_materials[p_name] += p_qty
+        total_raws = defaultdict(float)
+        total_components = defaultdict(float)
+        
+        # Memoization to avoid re-calculating branches
+        memo = {}
+
+        def process_component(product_id, required_quantity):
+            if product_id in memo and memo[product_id] >= required_quantity:
+                return
+            memo[product_id] = required_quantity
+
+            product_name = self.sde.get_type_name(product_id)
+            blueprint_info = self.sde.get_blueprint_for_product(product_id)
+
+            if product_name in self.raw_materials or blueprint_info is None:
+                total_raws[product_name] += required_quantity
                 return
 
-            # This is an intermediate component we need to build
-            if p_id != product_id: # Don't add the final product itself
-                 component_jobs[p_name] += p_qty
-
-            bp_id = blueprint['typeID']
-            activity_id = blueprint['activityID']
-            products_per_run = blueprint['quantity']
-            runs_needed = p_qty / products_per_run
-
-            materials = self.sde.get_materials_for_blueprint(bp_id, activity_id)
+            # It's an intermediate component, add to the list
+            total_components[product_name] += required_quantity
+            
+            blueprint_id = blueprint_info['typeID']
+            products_per_run = blueprint_info['quantity']
+            activity_id = blueprint_info['activityID']
+            
+            materials = self.sde.get_materials(blueprint_id, activity_id)
             for _, material in materials.iterrows():
                 mat_id = material['materialTypeID']
                 qty_per_run = material['quantity']
-                total_material_needed = runs_needed * qty_per_run
+                # Quantity of sub-component needed for the requested parent quantity
+                total_material_needed = (required_quantity / products_per_run) * qty_per_run
                 process_component(mat_id, total_material_needed)
 
-        process_component(product_id, quantity)
+        # Start the recursive calculation
+        process_component(final_product_id, quantity)
+        
+        # Separately calculate direct materials for the final product
+        final_product_direct_materials = {}
+        final_bp_info = self.sde.get_blueprint_for_product(final_product_id)
+        if final_bp_info is not None:
+            final_bp_id = final_bp_info['typeID']
+            final_activity_id = final_bp_info['activityID']
+            materials = self.sde.get_materials(final_bp_id, final_activity_id)
+            for _, material in materials.iterrows():
+                mat_name = self.sde.get_type_name(material['materialTypeID'])
+                final_product_direct_materials[mat_name] = material['quantity']
 
-        # Convert defaultdicts to regular dicts for clean output
-        return dict(bill_of_materials), dict(component_jobs)
+        return dict(total_raws), dict(total_components), final_product_direct_materials
+
