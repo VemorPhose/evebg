@@ -216,4 +216,3 @@ if __name__ == '__main__':
         runs = 1
         
     calculator.calculate_production_chain(product_name, runs)
-
