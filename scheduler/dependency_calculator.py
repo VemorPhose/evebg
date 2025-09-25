@@ -21,7 +21,7 @@ class DependencyCalculator:
         
         Returns two dictionaries:
         1. Total raw materials required.
-        2. Total intermediate components, with details on quantity and activity type.
+        2. Total intermediate components, with details on quantity, activity type, and time.
         """
         final_product_id = self.sde.get_type_id(final_product_name)
         if not final_product_id:
@@ -29,8 +29,7 @@ class DependencyCalculator:
             return {}, {}
 
         total_raws = defaultdict(float)
-        # The structure of total_components is now {name: {'needed': float, 'activity_id': int}}
-        total_components = defaultdict(lambda: {'needed': 0, 'activity_id': 0})
+        total_components = defaultdict(lambda: {'needed': 0, 'activity_id': 0, 'time_per_run': 0})
         
         memo = {}
 
@@ -46,12 +45,14 @@ class DependencyCalculator:
                 total_raws[product_name] += required_quantity
                 return
 
+            blueprint_id = blueprint_info['typeID']
             activity_id = blueprint_info['activityID']
+            products_per_run = blueprint_info['quantity']
+            time_per_run = self.sde.get_production_time(blueprint_id, activity_id)
+
             total_components[product_name]['needed'] += required_quantity
             total_components[product_name]['activity_id'] = activity_id
-            
-            blueprint_id = blueprint_info['typeID']
-            products_per_run = blueprint_info['quantity']
+            total_components[product_name]['time_per_run'] = time_per_run
             
             materials = self.sde.get_materials(blueprint_id, activity_id)
             for _, material in materials.iterrows():
@@ -83,3 +84,4 @@ class DependencyCalculator:
             direct_materials[mat_name] = material['quantity']
         
         return direct_materials
+

@@ -49,4 +49,12 @@ class SdeLoader:
             (self.activity_materials['typeID'] == blueprint_type_id) & 
             (self.activity_materials['activityID'] == activity_id)
         ]
+        
+    def get_production_time(self, blueprint_type_id, activity_id):
+        """Get the production time for a specific blueprint and activity."""
+        time_info = self.industry_activity[
+            (self.industry_activity['typeID'] == blueprint_type_id) & 
+            (self.industry_activity['activityID'] == activity_id)
+        ]
+        return time_info.iloc[0]['time'] if not time_info.empty else 0
 

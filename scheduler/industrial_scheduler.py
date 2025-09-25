@@ -48,68 +48,111 @@ def main():
         if have < needed:
             total_project_shopping_list[mat] = needed - have
 
-    # --- Job Prioritization ---
-    job_priorities = []
+    # --- Two-Tiered Job Prioritization ---
+    needed_jobs = []
+    filler_jobs = []
+    
     for comp, details in total_components.items():
         have = inventory_by_name.get(comp, 0)
         needed = details['needed']
         ratio = have / needed if needed > 0 else 1.0 
-        job_priorities.append({'name': comp, 'ratio': ratio, 'activity_id': details['activity_id']})
-    
-    job_priorities.sort(key=lambda x: x['ratio'])
+        
+        job_info = {
+            'name': comp, 
+            'ratio': ratio, 
+            'activity_id': details['activity_id'],
+            'time_per_run': details['time_per_run']
+        }
+        
+        if have < needed:
+            needed_jobs.append(job_info)
+        else:
+            filler_jobs.append(job_info)
+
+    # Sort both lists by completion ratio
+    needed_jobs.sort(key=lambda x: x['ratio'])
+    filler_jobs.sort(key=lambda x: x['ratio'])
     
     # --- Intelligent Job Recommendation ---
-    recommended_mfg = []
-    recommended_react = []
+    buildable_mfg = []
+    buildable_react = []
+    blocked_jobs = []
     immediate_shopping_list = defaultdict(float)
+    
+    SECONDS_IN_A_DAY = 86400
 
-    for job in job_priorities:
-        # Check if we have room for this job type
-        if job['activity_id'] == 1 and len(recommended_mfg) >= mfg_slots:
-            continue
-        if job['activity_id'] == 11 and len(recommended_react) >= react_slots:
-            continue
-        
-        direct_materials = dep_calc.get_direct_materials_for_product_name(job['name'])
-        is_buildable = True
-        missing_raws_for_this_job = defaultdict(float)
-
-        for mat, needed_per in direct_materials.items():
-            have = inventory_by_name.get(mat, 0)
-            if have < needed_per:
-                # Is the missing material a raw mineral/item or a sub-component?
-                if mat in dep_calc.raw_materials:
-                    missing_raws_for_this_job[mat] += needed_per - have
-                else: # Missing a sub-component, can't build this job right now.
-                    is_buildable = False
-                    break 
-        
-        if is_buildable:
-            if job['activity_id'] == 1:
-                recommended_mfg.append(job['name'])
-            else:
-                recommended_react.append(job['name'])
+    def recommend_jobs(job_list, is_filler=False):
+        """Helper function to process a list of jobs and find buildable ones."""
+        for job in job_list:
+            # Stop if slots are full
+            if job['activity_id'] == 1 and len(buildable_mfg) >= mfg_slots: continue
+            if job['activity_id'] == 11 and len(buildable_react) >= react_slots: continue
             
-            # Add any missing raws for this buildable job to the immediate shopping list
-            for item, qty in missing_raws_for_this_job.items():
-                immediate_shopping_list[item] += qty
+            time_per_run = job.get('time_per_run', 0)
+            runs_for_batch = 1
+            if time_per_run > 0:
+                runs_for_batch = max(1, round(SECONDS_IN_A_DAY / time_per_run))
+            
+            direct_materials = dep_calc.get_direct_materials_for_product_name(job['name'])
+            is_blocked = False
+            missing_raws_for_this_job = defaultdict(float)
+
+            for mat, needed_per_run in direct_materials.items():
+                needed_for_batch = needed_per_run * runs_for_batch
+                have = inventory_by_name.get(mat, 0)
+
+                if have < needed_for_batch:
+                    if mat in dep_calc.raw_materials:
+                        missing_raws_for_this_job[mat] += needed_for_batch - have
+                    else:
+                        is_blocked = True
+                        break 
+            
+            job_details = {'name': job['name'], 'runs': runs_for_batch, 'is_filler': is_filler}
+            
+            if is_blocked:
+                blocked_jobs.append(job_details)
+            else:
+                if job['activity_id'] == 1 and len(buildable_mfg) < mfg_slots:
+                    buildable_mfg.append(job_details)
+                    for item, qty in missing_raws_for_this_job.items():
+                        immediate_shopping_list[item] += qty
+                elif job['activity_id'] == 11 and len(buildable_react) < react_slots:
+                    buildable_react.append(job_details)
+                    for item, qty in missing_raws_for_this_job.items():
+                        immediate_shopping_list[item] += qty
+
+    # 1. Process CRITICAL jobs first
+    recommend_jobs(needed_jobs)
+    # 2. Process FILLER jobs only if slots are still empty
+    recommend_jobs(filler_jobs, is_filler=True)
+
+    # --- Fill remaining slots with blocked jobs for visibility ---
+    unfilled_mfg = mfg_slots - len(buildable_mfg)
+    unfilled_react = react_slots - len(buildable_react)
+    recommended_blocked_mfg = [j for j in blocked_jobs if total_components[j['name']]['activity_id'] == 1][:unfilled_mfg]
+    recommended_blocked_react = [j for j in blocked_jobs if total_components[j['name']]['activity_id'] == 11][:unfilled_react]
 
     # --- Display Actionable Plan ---
     print("\n" + "="*20 + " ACTION PLAN " + "="*20)
     
-    print(f"\n--- Recommended Manufacturing Jobs ({len(recommended_mfg)}/{mfg_slots} slots) ---")
-    if not recommended_mfg:
-        print("  - None")
-    else:
-        for job_name in recommended_mfg:
-            print(f"  - Start 1 run of: {job_name}")
+    print(f"\n--- Start These Jobs Now ({len(buildable_mfg)}/{mfg_slots} Mfg, {len(buildable_react)}/{react_slots} React) ---")
+    if not buildable_mfg and not buildable_react:
+        print("  - No jobs are ready to start. Check shopping list and blocked jobs.")
+    
+    for job in buildable_mfg:
+        tag = "(Filler)" if job['is_filler'] else ""
+        print(f"  [Mfg] Start {job['runs']} run(s) of: {job['name']} {tag}")
+    for job in buildable_react:
+        tag = "(Filler)" if job['is_filler'] else ""
+        print(f"  [React] Start {job['runs']} run(s) of: {job['name']} {tag}")
 
-    print(f"\n--- Recommended Reaction Jobs ({len(recommended_react)}/{react_slots} slots) ---")
-    if not recommended_react:
-        print("  - None")
-    else:
-        for job_name in recommended_react:
-            print(f"  - Start 1 run of: {job_name}")
+    if recommended_blocked_mfg or recommended_blocked_react:
+        print(f"\n--- Blocked Jobs (Prepare for These Next) ---")
+        for job in recommended_blocked_mfg:
+            print(f"  [Mfg] BLOCKED: {job['name']} (Waiting for components)")
+        for job in recommended_blocked_react:
+            print(f"  [React] BLOCKED: {job['name']} (Waiting for components)")
 
     if immediate_shopping_list:
         print("\n--- Shopping List (for IMMEDIATE jobs) ---")
@@ -124,9 +167,7 @@ def main():
         print("\n--- TOTAL Project Shopping List ---")
         print("  - All required raw materials are already in your structures.")
 
-
     print("\n" + "="*53)
 
 if __name__ == '__main__':
     main()
-
