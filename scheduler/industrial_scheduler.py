@@ -70,11 +70,20 @@ class IndustrialScheduler:
         simulated_inventory = self.inventory_by_name.copy()
         SECONDS_IN_A_DAY = 86400
 
-        for _ in range(self.target_quantity):
+        for i in range(self.target_quantity):
             mfg_count = sum(1 for j in self.recommended_jobs if j['activity_id'] == 1)
             react_count = sum(1 for j in self.recommended_jobs if j['activity_id'] == 11)
             if mfg_count >= self.mfg_slots and react_count >= self.react_slots:
                 break
+
+            # --- Inline addition for debugging ---
+            print(f"\n--- BFS Run {i+1}/{self.target_quantity}: Checking requirements for {self.target_product} ---")
+            final_product_materials = self.dep_calc.get_direct_materials_for_product_name(self.target_product)
+            for name, qty in sorted(final_product_materials.items()):
+                comp_type = "Raw Material" if self._is_raw_material(name) else "Producible"
+                have = self.inventory_by_name.get(name, 0)
+                print(f"  - Req: {name:<40} | Type: {comp_type:<12} | Needed: {qty:<10.0f} | Have: {have:<10.0f}")
+            # --- End of inline addition ---
 
             queue = deque([self.target_product])
             visited = {self.target_product}
@@ -167,5 +176,3 @@ class IndustrialScheduler:
 if __name__ == '__main__':
     scheduler = IndustrialScheduler()
     scheduler.run()
-
-
