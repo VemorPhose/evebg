@@ -70,75 +70,75 @@ class IndustrialScheduler:
         simulated_inventory = self.inventory_by_name.copy()
         SECONDS_IN_A_DAY = 86400
 
-        for i in range(self.target_quantity):
-            mfg_count = sum(1 for j in self.recommended_jobs if j['activity_id'] == 1)
-            react_count = sum(1 for j in self.recommended_jobs if j['activity_id'] == 11)
-            if mfg_count >= self.mfg_slots and react_count >= self.react_slots:
-                break
+        # --- Inline addition for debugging (scaled by target quantity) ---
+        print(f"\n--- BFS: Checking requirements for {self.target_product} (x{self.target_quantity}) ---")
+        final_product_materials = self.dep_calc.get_direct_materials_for_product_name(self.target_product)
+        # Multiply each value by the target quantity
+        final_product_materials = {name: qty * self.target_quantity for name, qty in final_product_materials.items()}
+        for name, qty in sorted(final_product_materials.items()):
+            comp_type = "Raw Material" if self._is_raw_material(name) else "Producible"
+            # CRITICAL FIX: The debug print now reads from the simulated_inventory
+            have = simulated_inventory.get(name, 0)
+            print(f"  - Req: {name:<40} | Type: {comp_type:<12} | Needed: {qty:<10.0f} | Have: {have:<10.0f}")
+        # --- End of inline addition ---
 
-            # --- Inline addition for debugging ---
-            print(f"\n--- BFS Run {i+1}/{self.target_quantity}: Checking requirements for {self.target_product} ---")
-            final_product_materials = self.dep_calc.get_direct_materials_for_product_name(self.target_product)
-            for name, qty in sorted(final_product_materials.items()):
-                comp_type = "Raw Material" if self._is_raw_material(name) else "Producible"
-                # CRITICAL FIX: The debug print now reads from the simulated_inventory
-                have = simulated_inventory.get(name, 0)
-                print(f"  - Req: {name:<40} | Type: {comp_type:<12} | Needed: {qty:<10.0f} | Have: {have:<10.0f}")
-            # --- End of inline addition ---
+        queue = deque([self.target_product])
+        visited = {self.target_product}
 
-            queue = deque([self.target_product])
-            visited = {self.target_product}
+        while queue:
+            current_comp_name = queue.popleft()
+            print(f'+ {current_comp_name}')
 
-            while queue:
-                current_comp_name = queue.popleft()
+            if self._is_raw_material(current_comp_name):
+                continue
 
-                if self._is_raw_material(current_comp_name):
-                    continue
+            comp_details = self.dep_calc.total_components.get(current_comp_name)
+            if not comp_details: continue
+            
+            time_per_run = comp_details.get('time_per_run', 0)
+            runs_for_batch = max(1, round(SECONDS_IN_A_DAY / time_per_run)) if time_per_run > 0 else 1
 
-                comp_details = self.dep_calc.total_components.get(current_comp_name)
-                if not comp_details: continue
+            direct_materials = self.dep_calc.get_direct_materials_for_product_name(current_comp_name)
+            producible_inputs = {mat: qty for mat, qty in direct_materials.items() if not self._is_raw_material(mat)}
+            raw_inputs = {mat: qty for mat, qty in direct_materials.items() if self._is_raw_material(mat)}
+
+            can_build = True
+            for sub_comp, qty_per in producible_inputs.items():
+                needed_for_batch = qty_per * runs_for_batch
+                # If we're evaluating the root product, scale by the total target quantity
+                if current_comp_name == self.target_product:
+                    needed_for_batch *= self.target_quantity
                 
-                time_per_run = comp_details.get('time_per_run', 0)
-                runs_for_batch = max(1, round(SECONDS_IN_A_DAY / time_per_run)) if time_per_run > 0 else 1
+                # CRITICAL LOGIC: Check and reserve materials immediately
+                if simulated_inventory.get(sub_comp, 0) >= needed_for_batch:
+                    # If available, "reserve" it in the simulation by subtracting it now.
+                    simulated_inventory[sub_comp] -= needed_for_batch
+                else:
+                    # If not available, this parent job cannot be built now.
+                    can_build = False
+                    # Add the missing sub-component to the queue to be planned.
+                    if sub_comp not in visited:
+                        queue.append(sub_comp)
+                        visited.add(sub_comp)
+            
+            if can_build:
+                job_info = {
+                    'name': current_comp_name,
+                    'runs': runs_for_batch,
+                    'activity_id': comp_details['activity_id']
+                }
+                self.recommended_jobs.append(job_info)
 
-                direct_materials = self.dep_calc.get_direct_materials_for_product_name(current_comp_name)
-                producible_inputs = {mat: qty for mat, qty in direct_materials.items() if not self._is_raw_material(mat)}
-                raw_inputs = {mat: qty for mat, qty in direct_materials.items() if self._is_raw_material(mat)}
+                # Note: We do NOT add the output back to simulated inventory.
+                # This plan is for what to start NOW, not what to do after jobs finish.
 
-                can_build = True
-                for sub_comp, qty_per in producible_inputs.items():
+                # Add to shopping list if real inventory is short on raws
+                for raw_mat, qty_per in raw_inputs.items():
                     needed_for_batch = qty_per * runs_for_batch
-                    
-                    # CRITICAL LOGIC: Check and reserve materials immediately
-                    if simulated_inventory.get(sub_comp, 0) >= needed_for_batch:
-                        # If available, "reserve" it in the simulation by subtracting it now.
-                        simulated_inventory[sub_comp] -= needed_for_batch
-                    else:
-                        # If not available, this parent job cannot be built now.
-                        can_build = False
-                        # Add the missing sub-component to the queue to be planned.
-                        if sub_comp not in visited:
-                            queue.append(sub_comp)
-                            visited.add(sub_comp)
-                
-                if can_build:
-                    job_info = {
-                        'name': current_comp_name,
-                        'runs': runs_for_batch,
-                        'activity_id': comp_details['activity_id']
-                    }
-                    self.recommended_jobs.append(job_info)
-
-                    # Note: We do NOT add the output back to simulated inventory.
-                    # This plan is for what to start NOW, not what to do after jobs finish.
-
-                    # Add to shopping list if real inventory is short on raws
-                    for raw_mat, qty_per in raw_inputs.items():
-                        needed_for_batch = qty_per * runs_for_batch
-                        if self.inventory_by_name.get(raw_mat, 0) < needed_for_batch:
-                            self.shopping_list[raw_mat] += needed_for_batch - self.inventory_by_name.get(raw_mat, 0)
-                            # To prevent re-adding, assume we "bought" it for the simulation's asset check
-                            self.inventory_by_name[raw_mat] = needed_for_batch 
+                    if self.inventory_by_name.get(raw_mat, 0) < needed_for_batch:
+                        self.shopping_list[raw_mat] += needed_for_batch - self.inventory_by_name.get(raw_mat, 0)
+                        # To prevent re-adding, assume we "bought" it for the simulation's asset check
+                        self.inventory_by_name[raw_mat] = needed_for_batch 
 
     def _display_action_plan(self):
         mfg_to_start = [j for j in self.recommended_jobs if j['activity_id'] == 1][:self.mfg_slots]
