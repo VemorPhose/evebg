@@ -107,9 +107,15 @@ class IndustrialScheduler:
                 can_build = True
                 for sub_comp, qty_per in producible_inputs.items():
                     needed_for_batch = qty_per * runs_for_batch
-                    # CRITICAL FIX: Check against the simulated inventory
-                    if simulated_inventory.get(sub_comp, 0) < needed_for_batch:
+                    
+                    # CRITICAL LOGIC FIX: Check and reserve materials immediately
+                    if simulated_inventory.get(sub_comp, 0) >= needed_for_batch:
+                        # If available, "reserve" it in the simulation by subtracting it now.
+                        simulated_inventory[sub_comp] -= needed_for_batch
+                    else:
+                        # If not available, this parent job cannot be built now.
                         can_build = False
+                        # Add the missing sub-component to the queue to be planned.
                         if sub_comp not in visited:
                             queue.append(sub_comp)
                             visited.add(sub_comp)
@@ -122,16 +128,15 @@ class IndustrialScheduler:
                     }
                     self.recommended_jobs.append(job_info)
 
-                    # CRITICAL FIX: Update simulated inventory by consuming inputs
-                    for mat, qty in direct_materials.items():
-                        simulated_inventory[mat] = simulated_inventory.get(mat, 0) - (qty * runs_for_batch)
+                    # Note: We do NOT add the output back to simulated inventory.
+                    # This plan is for what to start NOW, not what to do after jobs finish.
 
                     # Add to shopping list if real inventory is short on raws
                     for raw_mat, qty_per in raw_inputs.items():
                         needed_for_batch = qty_per * runs_for_batch
                         if self.inventory_by_name.get(raw_mat, 0) < needed_for_batch:
                             self.shopping_list[raw_mat] += needed_for_batch - self.inventory_by_name.get(raw_mat, 0)
-                            # To prevent re-adding to shopping list, assume we "bought" it for the simulation
+                            # To prevent re-adding, assume we "bought" it for the simulation's asset check
                             self.inventory_by_name[raw_mat] = needed_for_batch 
 
     def _display_action_plan(self):
@@ -176,3 +181,4 @@ class IndustrialScheduler:
 if __name__ == '__main__':
     scheduler = IndustrialScheduler()
     scheduler.run()
+
