@@ -81,7 +81,8 @@ class IndustrialScheduler:
             final_product_materials = self.dep_calc.get_direct_materials_for_product_name(self.target_product)
             for name, qty in sorted(final_product_materials.items()):
                 comp_type = "Raw Material" if self._is_raw_material(name) else "Producible"
-                have = self.inventory_by_name.get(name, 0)
+                # CRITICAL FIX: The debug print now reads from the simulated_inventory
+                have = simulated_inventory.get(name, 0)
                 print(f"  - Req: {name:<40} | Type: {comp_type:<12} | Needed: {qty:<10.0f} | Have: {have:<10.0f}")
             # --- End of inline addition ---
 
@@ -108,7 +109,7 @@ class IndustrialScheduler:
                 for sub_comp, qty_per in producible_inputs.items():
                     needed_for_batch = qty_per * runs_for_batch
                     
-                    # CRITICAL LOGIC FIX: Check and reserve materials immediately
+                    # CRITICAL LOGIC: Check and reserve materials immediately
                     if simulated_inventory.get(sub_comp, 0) >= needed_for_batch:
                         # If available, "reserve" it in the simulation by subtracting it now.
                         simulated_inventory[sub_comp] -= needed_for_batch
@@ -181,4 +182,3 @@ class IndustrialScheduler:
 if __name__ == '__main__':
     scheduler = IndustrialScheduler()
     scheduler.run()
-
