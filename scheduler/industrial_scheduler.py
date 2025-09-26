@@ -87,9 +87,10 @@ class IndustrialScheduler:
 
         while queue:
             current_comp_name = queue.popleft()
-            print(f'+ {current_comp_name}')
 
+            # If it's raw, just note and continue
             if self._is_raw_material(current_comp_name):
+                print(f"+ {current_comp_name} -> raw material (skip)")
                 continue
 
             comp_details = self.dep_calc.total_components.get(current_comp_name)
@@ -103,23 +104,34 @@ class IndustrialScheduler:
             raw_inputs = {mat: qty for mat, qty in direct_materials.items() if self._is_raw_material(mat)}
 
             can_build = True
+            missing_details = []  # list of tuples [(name, missing_qty), ...]
             for sub_comp, qty_per in producible_inputs.items():
                 needed_for_batch = qty_per * runs_for_batch
                 # If we're evaluating the root product, scale by the total target quantity
                 if current_comp_name == self.target_product:
                     needed_for_batch *= self.target_quantity
-                
+
+                have_now = simulated_inventory.get(sub_comp, 0)
                 # CRITICAL LOGIC: Check and reserve materials immediately
-                if simulated_inventory.get(sub_comp, 0) >= needed_for_batch:
+                if have_now >= needed_for_batch:
                     # If available, "reserve" it in the simulation by subtracting it now.
-                    simulated_inventory[sub_comp] -= needed_for_batch
+                    simulated_inventory[sub_comp] = have_now - needed_for_batch
                 else:
                     # If not available, this parent job cannot be built now.
                     can_build = False
+                    missing_qty = needed_for_batch - have_now
+                    missing_details.append((sub_comp, missing_qty))
                     # Add the missing sub-component to the queue to be planned.
                     if sub_comp not in visited:
                         queue.append(sub_comp)
                         visited.add(sub_comp)
+
+            # Verbose BFS step output
+            if missing_details:
+                missing_str = ", ".join(f"{name} x{math.ceil(miss)}" for name, miss in missing_details)
+                print(f"+ {current_comp_name} -> missing: {missing_str}")
+            else:
+                print(f"+ {current_comp_name} -> buildable now")
             
             if can_build:
                 job_info = {
