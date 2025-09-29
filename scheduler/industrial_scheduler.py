@@ -40,9 +40,9 @@ class IndustrialScheduler:
         
         try:
             self.mfg_slots = int(input(f"Enter available manufacturing slots [Default: 9]: ") or 9)
-            self.react_slots = int(input(f"Enter available reaction slots [Default: 5]: ") or 5)
+            self.react_slots = int(input(f"Enter available reaction slots [Default: 9]: ") or 9)
         except ValueError:
-            self.mfg_slots, self.react_slots = 9, 5
+            self.mfg_slots, self.react_slots = 9, 9
 
     def _fetch_inventory(self):
         print("Fetching current inventory...")
