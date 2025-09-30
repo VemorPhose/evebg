@@ -20,13 +20,10 @@ CONFIDENCE_THRESHOLD = 0.8
 # --- END OF PRIMARY CHECK CONFIGURATION ---
 
 
-# --- SECONDARY CHECK CONFIGURATION ---
-# Define the second area to watch on the screen.
-WATCH_REGION_2 = {'top': 100, 'left': 1000, 'width': 200, 'height': 100}
-# List of template images for the second check.
-TEMPLATE_IMAGES_2 = ['secondary_image.png']
-# Confidence threshold for the second check.
-CONFIDENCE_THRESHOLD_2 = 0.8
+# --- SECONDARY CHECK CONFIGURATION (TIMED) ---
+# The script will run the secondary macro after this many seconds.
+# 30 minutes = 30 * 60 = 1800 seconds
+MACRO_2_INTERVAL = 1800 
 # --- END OF SECONDARY CHECK CONFIGURATION ---
 
 
@@ -108,17 +105,46 @@ def perform_macro():
 
 def perform_macro_2():
     """
-    This is the macro for the SECONDARY check (blue box).
+    This is the macro for the SECONDARY (timed) check.
     This function is called AFTER the EVE Online window is activated.
     """
     print(">>> Performing SECONDARY macro...")
     
-    # --- EXAMPLE MACRO ---
-    # Replace this with your own sequence of actions for the second trigger.
-    pyautogui.press('f2')
-    time.sleep(1 + random.uniform(0, 0.25))
-    print("Clicking something else at (1500, 800)...")
-    pyautogui.moveTo(1500, 800)
+    # --- Tunable Variables for Macro 2 ---
+    # The long wait duration in seconds.
+    long_wait_duration = 60
+    
+    # Coordinates for the clicks.
+    click_1_coords = {'x': 929, 'y': 1380}
+    click_2_coords = {'x': 841, 'y': 116}
+    click_3_coords = {'x': 930, 'y': 1171}
+    # --- End of Tunable Variables ---
+
+    # 1. Wait 2 seconds (+ random delay) after switching tabs.
+    time.sleep(2 + random.uniform(0, 0.25))
+
+    # 2. Left click the first coordinate.
+    print(f"Left-clicking first coordinate at ({click_1_coords['x']}, {click_1_coords['y']})...")
+    pyautogui.moveTo(click_1_coords['x'], click_1_coords['y'])
+    time.sleep(random.uniform(0.5, 0.75))
+    pyautogui.click()
+
+    # 3. Wait 2 seconds (+ random delay).
+    time.sleep(2 + random.uniform(0, 0.25))
+
+    # 4. Left click the second coordinate.
+    print(f"Left-clicking second coordinate at ({click_2_coords['x']}, {click_2_coords['y']})...")
+    pyautogui.moveTo(click_2_coords['x'], click_2_coords['y'])
+    time.sleep(random.uniform(0.5, 0.75))
+    pyautogui.click()
+    
+    # 5. Wait for the long duration (+ random delay).
+    print(f"Waiting for {long_wait_duration} seconds...")
+    time.sleep(long_wait_duration + random.uniform(0, 0.25))
+
+    # 6. Left click the third coordinate.
+    print(f"Left-clicking third coordinate at ({click_3_coords['x']}, {click_3_coords['y']})...")
+    pyautogui.moveTo(click_3_coords['x'], click_3_coords['y'])
     time.sleep(random.uniform(0.5, 0.75))
     pyautogui.click()
 
@@ -129,13 +155,12 @@ def main():
     """Main function to run the detection loop."""
     print("--- Starting Screen Detector ---")
     print(f"Watching primary region: {WATCH_REGION}")
-    print(f"Watching secondary region: {WATCH_REGION_2}")
+    print(f"Secondary macro will run every {MACRO_2_INTERVAL / 60} minutes.")
 
     try:
-        # Load templates for both checks
-        templates1 = [cv2.imread(img, cv2.IMREAD_GRAYSCALE) for img in TEMPLATE_IMAGES]
-        templates2 = [cv2.imread(img, cv2.IMREAD_GRAYSCALE) for img in TEMPLATE_IMAGES_2]
-        if any(t is None for t in templates1) or any(t is None for t in templates2):
+        # Load templates for the primary check in color
+        templates1 = [cv2.imread(img) for img in TEMPLATE_IMAGES]
+        if any(t is None for t in templates1):
             print("Error: One or more template images could not be loaded.")
             print("Please ensure image files are in the correct directory and not corrupted.")
             return
@@ -143,28 +168,27 @@ def main():
         print(f"An error occurred while loading images: {e}")
         return
 
-    # Create visual overlays
+    # Create visual overlay for the primary check
     overlay1 = create_overlay_box(WATCH_REGION, 'lime') # Green for first check
-    overlay2 = create_overlay_box(WATCH_REGION_2, 'blue') # Blue for second check
     
     sct = mss.mss()
     
-    # Flag for the secondary check logic. Initialized to True (1).
-    secondary_check_flag = True
+    # Initialize the timer for the secondary macro
+    last_macro_2_time = time.time()
 
     try:
         while True:
-            # Keep overlay windows responsive
+            # Keep overlay window responsive
             overlay1.update()
-            overlay2.update()
             
             # --- PERFORM FIRST CHECK (GREEN BOX) ---
             screenshot1 = sct.grab(WATCH_REGION)
             img1 = np.array(screenshot1)
-            img_gray1 = cv2.cvtColor(img1, cv2.COLOR_BGRA2GRAY)
+            # Convert the screenshot from BGRA to BGR for color matching
+            img_color1 = cv2.cvtColor(img1, cv2.COLOR_BGRA2BGR)
 
             for i, template in enumerate(templates1):
-                res = cv2.matchTemplate(img_gray1, template, cv2.TM_CCOEFF_NORMED)
+                res = cv2.matchTemplate(img_color1, template, cv2.TM_CCOEFF_NORMED)
                 _, max_val, _, _ = cv2.minMaxLoc(res)
 
                 if max_val >= CONFIDENCE_THRESHOLD:
@@ -187,26 +211,9 @@ def main():
                     print("--- Script finished successfully. ---")
                     return
 
-            # --- PERFORM SECOND CHECK (BLUE BOX) ---
-            screenshot2 = sct.grab(WATCH_REGION_2)
-            img2 = np.array(screenshot2)
-            img_gray2 = cv2.cvtColor(img2, cv2.COLOR_BGRA2GRAY)
-            
-            match_found_secondary = False
-            matched_image_name = ""
-            for i, template in enumerate(templates2):
-                res = cv2.matchTemplate(img_gray2, template, cv2.TM_CCOEFF_NORMED)
-                _, max_val, _, _ = cv2.minMaxLoc(res)
-
-                if max_val >= CONFIDENCE_THRESHOLD_2:
-                    match_found_secondary = True
-                    matched_image_name = TEMPLATE_IMAGES_2[i]
-                    break # A match was found, no need to check other templates
-
-            # Apply the new flag-based logic
-            if match_found_secondary and not secondary_check_flag:
-                # CONDITION: Image is detected AND flag is 0 -> TRIGGER MACRO
-                print(f"SUCCESS (Secondary Trigger): Match for '{matched_image_name}' reappeared.")
+            # --- PERFORM TIMED CHECK (MACRO 2) ---
+            if time.time() - last_macro_2_time >= MACRO_2_INTERVAL:
+                print(f"Timer reached. Triggering secondary macro...")
                 try:
                     eve_windows = gw.getWindowsWithTitle(TARGET_WINDOW_TITLE)
                     if eve_windows:
@@ -214,22 +221,17 @@ def main():
                         eve_windows[0].activate()
                         time.sleep(0.5)
                     else:
-                        print(f"Error: Could not find window '{TARGET_WINDOW_TITLE}'.")
-                        return
+                        print(f"Error: Could not find window '{TARGET_WINDOW_TITLE}' for secondary macro.")
+                        # Continue the loop even if window not found, maybe it will reappear
+                        continue 
                 except Exception as e:
-                    print(f"An error occurred while activating window: {e}")
-                    return
+                    print(f"An error occurred while activating window for secondary macro: {e}")
+                    continue
 
                 perform_macro_2()
-                print("--- Script finished successfully. ---")
-                return # Terminate the script after the macro runs
-            
-            elif not match_found_secondary and secondary_check_flag:
-                # CONDITION: Image is NOT detected AND flag is 1 -> Toggle flag to 0
-                print("Secondary check: Image has disappeared. Setting flag to 0.")
-                secondary_check_flag = False
-            
-            # The other two conditions (image present & flag=1; image absent & flag=0) require no action.
+                print("Resetting timer for secondary macro.")
+                # Reset the timer for the next interval
+                last_macro_2_time = time.time()
 
             # Wait before the next full scan cycle
             time.sleep(LOOP_DELAY)
@@ -237,12 +239,9 @@ def main():
     except KeyboardInterrupt:
         print("\n--- Script stopped by user. ---")
     finally:
-        # Ensure both overlay windows are closed
+        # Ensure the overlay window is closed
         overlay1.destroy()
-        overlay2.destroy()
 
 
 if __name__ == "__main__":
     main()
-
-
