@@ -23,7 +23,7 @@ CONFIDENCE_THRESHOLD = 0.8
 # --- SECONDARY CHECK CONFIGURATION (TIMED) ---
 # The script will run the secondary macro after this many seconds.
 # 30 minutes = 30 * 60 = 1800 seconds
-MACRO_2_INTERVAL = 1800 
+MACRO_2_INTERVAL = 2100 
 # --- END OF SECONDARY CHECK CONFIGURATION ---
 
 
