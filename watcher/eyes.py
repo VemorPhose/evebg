@@ -22,7 +22,7 @@ CONFIDENCE_THRESHOLD = 0.8
 
 # --- SECONDARY CHECK CONFIGURATION (TIMED) ---
 # The script will run the secondary macro after this many seconds.
-# 30 minutes = 30 * 60 = 1800 seconds
+# 35 minutes = 35 * 60 = 2100 seconds
 MACRO_2_INTERVAL = 2100 
 # --- END OF SECONDARY CHECK CONFIGURATION ---
 
@@ -117,7 +117,7 @@ def perform_macro_2():
     # Coordinates for the clicks.
     click_1_coords = {'x': 929, 'y': 1380}
     click_2_coords = {'x': 841, 'y': 116}
-    click_3_coords = {'x': 930, 'y': 1171}
+    click_3_coords = {'x': 931, 'y': 1230}
     # --- End of Tunable Variables ---
 
     # 1. Wait 2 seconds (+ random delay) after switching tabs.
@@ -155,7 +155,7 @@ def main():
     """Main function to run the detection loop."""
     print("--- Starting Screen Detector ---")
     print(f"Watching primary region: {WATCH_REGION}")
-    print(f"Secondary macro will run every {MACRO_2_INTERVAL / 60} minutes.")
+    print(f"Secondary macro will run once immediately, then every {MACRO_2_INTERVAL / 60} minutes.")
 
     try:
         # Load templates for the primary check in color
@@ -175,6 +175,8 @@ def main():
     
     # Initialize the timer for the secondary macro
     last_macro_2_time = time.time()
+    # Flag to ensure macro 2 runs once at the very beginning
+    first_run_macro_2 = True
 
     try:
         while True:
@@ -212,8 +214,12 @@ def main():
                     return
 
             # --- PERFORM TIMED CHECK (MACRO 2) ---
-            if time.time() - last_macro_2_time >= MACRO_2_INTERVAL:
-                print(f"Timer reached. Triggering secondary macro...")
+            if first_run_macro_2 or (time.time() - last_macro_2_time >= MACRO_2_INTERVAL):
+                if first_run_macro_2:
+                    print("Performing initial run of secondary macro...")
+                else:
+                    print(f"Timer reached. Triggering secondary macro...")
+                
                 try:
                     eve_windows = gw.getWindowsWithTitle(TARGET_WINDOW_TITLE)
                     if eve_windows:
@@ -229,6 +235,11 @@ def main():
                     continue
 
                 perform_macro_2()
+                
+                # Turn off the flag after the first run is complete
+                if first_run_macro_2:
+                    first_run_macro_2 = False
+
                 print("Resetting timer for secondary macro.")
                 # Reset the timer for the next interval
                 last_macro_2_time = time.time()
