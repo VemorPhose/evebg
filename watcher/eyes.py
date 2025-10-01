@@ -2,7 +2,7 @@ import cv2
 import numpy as np
 import mss
 import pyautogui
-import pygetwindow as gw
+# import pygetwindow as gw # No longer needed for window activation
 import time
 import tkinter as tk
 import random
@@ -22,7 +22,7 @@ TEMPLATE_IMAGES = [
 ]
 
 # The title of the window to activate when a match is found.
-# Use a unique part of the window title for EVE Online.
+# This is now just for reference, as activation is done by coordinate click.
 TARGET_WINDOW_TITLE = "EVE - Vemor Phose" 
 
 # Confidence threshold for matching. A value between 0.0 and 1.0.
@@ -151,9 +151,9 @@ def perform_macro_2():
     # Coordinates for the clicks.
     click_1_coords = {'x': 929, 'y': 1380}
     click_2_coords = {'x': 841, 'y': 116}
-    # !!! TUNE THESE COORDINATES MANUALLY !!!
     click_3_coords = {'x': 1763, 'y': 1475}
-    click_4_coords = {'x': 1763, 'y': 1475} 
+    click_4_coords = {'x': 1763, 'y': 1475}
+    final_click_coords = {'x': 931, 'y': 1230}
     # --- End of Tunable Variables ---
 
     # 1. Wait 2 seconds (+ random delay) after switching tabs.
@@ -196,6 +196,16 @@ def perform_macro_2():
     
     # 9. Wait 2 seconds (+ random delay).
     print("Waiting 2 seconds...")
+    time.sleep(2 + random.uniform(0, 0.25))
+
+    # 10. Left click the final coordinate.
+    print(f"Left-clicking at ({final_click_coords['x']}, {final_click_coords['y']})...")
+    pyautogui.moveTo(final_click_coords['x'], final_click_coords['y'])
+    time.sleep(random.uniform(0.5, 0.75))
+    pyautogui.click()
+    
+    # 11. Wait another 2 seconds before finishing.
+    print("Waiting final 2 seconds...")
     time.sleep(2 + random.uniform(0, 0.25))
 
     print(">>> SECONDARY Macro finished. Returning to loop.")
@@ -245,19 +255,10 @@ def main():
                 if max_val >= CONFIDENCE_THRESHOLD:
                     print(f"SUCCESS: Match found for '{TEMPLATE_IMAGES[i]}' with {max_val*100:.2f}% confidence.")
                     
-                    try:
-                        eve_windows = gw.getWindowsWithTitle(TARGET_WINDOW_TITLE)
-                        if eve_windows:
-                            print(f"Activating window: {eve_windows[0].title}")
-                            eve_windows[0].activate()
-                            time.sleep(0.5)
-                        else:
-                            print(f"Error: Could not find a window with title containing '{TARGET_WINDOW_TITLE}'.")
-                            print("Script will now terminate.")
-                            return
-                    except Exception as e:
-                        print(f"An error occurred while activating the window: {e}")
-                        return
+                    # --- Focus window by clicking coordinate ---
+                    print("Forcing focus with a click at (0, 1200)...")
+                    pyautogui.click(x=0, y=1200) 
+                    time.sleep(1.0) # Allow time for window to gain focus
 
                     perform_macro()
                     print("--- Script finished successfully. ---")
@@ -285,32 +286,10 @@ def main():
                 else:
                     print(f"Timer reached. Triggering secondary macro...")
                 
-                try:
-                    eve_windows = gw.getWindowsWithTitle(TARGET_WINDOW_TITLE)
-                    if eve_windows:
-                        win = eve_windows[0]
-                        print(f"Attempting to activate window: {win.title}")
-                        
-                        # --- MORE ROBUST ACTIVATION LOGIC ---
-                        if win.isMinimized:
-                            win.restore()
-                            time.sleep(0.5)
-
-                        win.activate()
-                        time.sleep(0.5)
-
-                        print("Forcing focus with a confirmation click at (0, 1200)...")
-                        pyautogui.click(x=0, y=1200) 
-                        time.sleep(0.5)
-                        # --- END OF MORE ROBUST ACTIVATION LOGIC ---
-
-                    else:
-                        print(f"Error: Could not find window '{TARGET_WINDOW_TITLE}' for secondary macro.")
-                        continue 
-                except Exception as e:
-                    print(f"An error occurred while activating window for secondary macro: {e}")
-                    print("This can happen if the script lacks admin rights or another app is preventing focus.")
-                    continue
+                # --- Focus window by clicking coordinate ---
+                print("Forcing focus with a click at (0, 1200) for secondary macro...")
+                pyautogui.click(x=0, y=1200) 
+                time.sleep(1.0) # Allow time for window to gain focus
 
                 perform_macro_2()
                 last_macro_2_time = time.time()
