@@ -148,13 +148,12 @@ def perform_macro_2():
     print(">>> Performing SECONDARY macro...")
     
     # --- Tunable Variables for Macro 2 ---
-    # The long wait duration in seconds.
-    long_wait_duration = 60
-    
     # Coordinates for the clicks.
     click_1_coords = {'x': 929, 'y': 1380}
     click_2_coords = {'x': 841, 'y': 116}
-    click_3_coords = {'x': 931, 'y': 1230}
+    # !!! TUNE THESE COORDINATES MANUALLY !!!
+    click_3_coords = {'x': 1763, 'y': 1475}
+    click_4_coords = {'x': 1763, 'y': 1475} 
     # --- End of Tunable Variables ---
 
     # 1. Wait 2 seconds (+ random delay) after switching tabs.
@@ -166,8 +165,8 @@ def perform_macro_2():
     time.sleep(random.uniform(0.5, 0.75))
     pyautogui.click()
 
-    # 3. Wait 2 seconds (+ random delay).
-    time.sleep(2 + random.uniform(0, 0.25))
+    # 3. Wait 15 seconds (+ random delay).
+    time.sleep(15 + random.uniform(0, 0.25))
 
     # 4. Left click coordinate 2.
     print(f"Left-clicking at ({click_2_coords['x']}, {click_2_coords['y']})...")
@@ -175,15 +174,29 @@ def perform_macro_2():
     time.sleep(random.uniform(0.5, 0.75))
     pyautogui.click()
 
-    # 5. Wait for the tunable duration (+ random delay).
-    print(f"Waiting for {long_wait_duration} seconds...")
-    time.sleep(long_wait_duration + random.uniform(0, 0.25))
+    # 5. Wait 2 seconds (+ random delay).
+    print("Waiting 2 seconds...")
+    time.sleep(2 + random.uniform(0, 0.25))
 
     # 6. Left click coordinate 3.
     print(f"Left-clicking at ({click_3_coords['x']}, {click_3_coords['y']})...")
     pyautogui.moveTo(click_3_coords['x'], click_3_coords['y'])
     time.sleep(random.uniform(0.5, 0.75))
     pyautogui.click()
+
+    # 7. Wait 56 seconds (+ random delay).
+    print("Waiting 56 seconds...")
+    time.sleep(56 + random.uniform(0, 0.25))
+
+    # 8. Left click coordinate 4.
+    print(f"Left-clicking at ({click_4_coords['x']}, {click_4_coords['y']})...")
+    pyautogui.moveTo(click_4_coords['x'], click_4_coords['y'])
+    time.sleep(random.uniform(0.5, 0.75))
+    pyautogui.click()
+    
+    # 9. Wait 2 seconds (+ random delay).
+    print("Waiting 2 seconds...")
+    time.sleep(2 + random.uniform(0, 0.25))
 
     print(">>> SECONDARY Macro finished. Returning to loop.")
 
