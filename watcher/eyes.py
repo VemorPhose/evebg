@@ -34,7 +34,7 @@ LOOP_DELAY = 0.5
 
 # --- SECONDARY CHECK CONFIGURATION ---
 # The time in seconds between running the secondary macro.
-MACRO_2_INTERVAL = 38 * 60 # 38 minutes
+MACRO_2_INTERVAL = 40 * 60 # 40 minutes
 
 # --- END OF CONFIGURATION ---
 
@@ -178,21 +178,21 @@ def perform_macro_2():
     print("Waiting 2 seconds...")
     time.sleep(2 + random.uniform(0, 0.25))
 
-    # 6. Left click coordinate 3.
-    print(f"Left-clicking at ({click_3_coords['x']}, {click_3_coords['y']})...")
-    pyautogui.moveTo(click_3_coords['x'], click_3_coords['y'])
-    time.sleep(random.uniform(0.5, 0.75))
-    pyautogui.click()
+    # # 6. Left click coordinate 3.
+    # print(f"Left-clicking at ({click_3_coords['x']}, {click_3_coords['y']})...")
+    # pyautogui.moveTo(click_3_coords['x'], click_3_coords['y'])
+    # time.sleep(random.uniform(0.5, 0.75))
+    # pyautogui.click()
 
     # 7. Wait 56 seconds (+ random delay).
     print("Waiting 56 seconds...")
     time.sleep(56 + random.uniform(0, 0.25))
 
-    # 8. Left click coordinate 4.
-    print(f"Left-clicking at ({click_4_coords['x']}, {click_4_coords['y']})...")
-    pyautogui.moveTo(click_4_coords['x'], click_4_coords['y'])
-    time.sleep(random.uniform(0.5, 0.75))
-    pyautogui.click()
+    # # 8. Left click coordinate 4.
+    # print(f"Left-clicking at ({click_4_coords['x']}, {click_4_coords['y']})...")
+    # pyautogui.moveTo(click_4_coords['x'], click_4_coords['y'])
+    # time.sleep(random.uniform(0.5, 0.75))
+    # pyautogui.click()
     
     # 9. Wait 2 seconds (+ random delay).
     print("Waiting 2 seconds...")
