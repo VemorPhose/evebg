@@ -234,7 +234,7 @@ def main():
     results_df = pd.DataFrame(results)
     
     # Sort by the most optimistic profit scenario (order-based profit percentage)
-    results_df_sorted = results_df.sort_values(by='Profit % (Order-based)', ascending=False)
+    results_df_sorted = results_df.sort_values(by='Net Profit per Week', ascending=False)
     
     # Format columns for better readability
     for col in results_df_sorted.columns:
